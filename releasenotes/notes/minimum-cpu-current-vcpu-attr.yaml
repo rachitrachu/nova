@@ -1,0 +1,8 @@
+---
+features:
+  - |
+    The libvirt driver now honors the ``minimum_cpu`` flavor extra spec by
+    setting the ``current`` attribute of the ``<vcpu>`` element in the domain
+    XML. Nova preserves the flavor ``vcpus`` as the maximum and stores the
+    ``minimum_cpu`` value in instance metadata, allowing guests to boot with
+    fewer vCPUs and grow up to the flavor limit automatically.

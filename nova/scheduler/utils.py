@@ -157,7 +157,7 @@ class ResourceRequest(object):
 
         if enable_pinning_translate:
             # Next up, let's handle those pesky CPU pinning policies
-            res_req._translate_pinning_policies(request_spec.flavor, image)
+            res_req._translate_pinning_policies(request_spec, image)  #xloud
 
         # Add on any request groups that came from outside of the flavor/image,
         # e.g. from ports or device profiles.
@@ -361,7 +361,7 @@ class ResourceRequest(object):
             LOG.debug("Added resource %s=%d to requested resources",
                       resource_class, amount)
 
-    def _translate_pinning_policies(self, flavor, image):
+    def _translate_pinning_policies(self, request_spec, image):  ##xloud
         """Translate the legacy pinning policies to resource requests."""
         # NOTE(stephenfin): These can raise exceptions but these have already
         # been validated by 'nova.virt.hardware.numa_get_constraints' in the
@@ -370,6 +370,7 @@ class ResourceRequest(object):
         # requests and implicit 'hw:cpu_policy'-based requests, mismatches
         # between the number of CPUs in the flavor and explicit VCPU/PCPU
         # requests, etc.
+        flavor = request_spec.flavor  #xloud
         cpu_policy = hardware.get_cpu_policy_constraint(
             flavor, image)
         cpu_thread_policy = hardware.get_cpu_thread_policy_constraint(
@@ -384,7 +385,7 @@ class ResourceRequest(object):
             self.cpu_pinning_requested = True
 
             # Switch VCPU -> PCPU
-            pcpus = flavor.vcpus
+            pcpus = request_spec.vcpus  #xloud
 
             LOG.debug('Translating request for %(vcpu_rc)s=%(pcpus)d to '
                       '%(vcpu_rc)s=0,%(pcpu_rc)s=%(pcpus)d',
@@ -400,7 +401,7 @@ class ResourceRequest(object):
             realtime_cpus = hardware.get_realtime_cpu_constraint(flavor, image)
 
             pcpus = len(dedicated_cpus or realtime_cpus or [])
-            vcpus = flavor.vcpus - pcpus
+            vcpus = request_spec.vcpus - pcpus  #xloud
 
             # apply for the VCPU resource of a 'mixed' instance
             self._add_resource(orc.VCPU, vcpus)

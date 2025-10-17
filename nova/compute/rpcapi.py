@@ -582,6 +582,32 @@ class ComputeAPI(object):
                                version=version)
         return cctxt.call(ctxt, 'attach_interface', **kw)
 
+    ############Xloud Code
+    def hotplug_vcpus(self, ctxt, instance, new_count):
+        kw = {'instance': instance, 'new_count': new_count}
+        version = self._ver(ctxt, '6.0')
+        client = self.router.client(ctxt)
+        cctxt = client.prepare(server=_compute_host(None, instance),
+                               version=version)
+        return cctxt.call(ctxt, 'hotplug_vcpus', **kw)
+
+    def xloud_adjust_vcpus(self, ctxt, instance, target, persist=False):
+        """Adjust current vCPUs live (and optionally persist)."""
+        version = self._ver(ctxt, '6.0')
+        client = self.router.client(ctxt)
+        cctxt = client.prepare(server=_compute_host(None, instance), version=version)
+        cctxt.cast(ctxt, 'xloud_adjust_vcpus',
+                instance=instance, target=int(target), persist=bool(persist))
+
+    def xloud_adjust_memory(self, ctxt, instance, target_mb, persist=False):
+        """Adjust current balloon memory (MiB) live (and optionally persist)."""
+        version = self._ver(ctxt, '6.0')
+        client = self.router.client(ctxt)
+        cctxt = client.prepare(server=_compute_host(None, instance), version=version)
+        cctxt.cast(ctxt, 'xloud_adjust_memory',
+               instance=instance, target_mb=int(target_mb), persist=bool(persist))
+    ################
+
     def attach_volume(self, ctxt, instance, bdm):
         version = self._ver(ctxt, '5.0')
         cctxt = self.router.client(ctxt).prepare(

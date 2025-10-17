@@ -770,6 +770,50 @@ class LibvirtDriver(driver.ComputeDriver):
             self.cpu_api.power_up(cpus)
             self._host.get_capabilities()
 
+    ######### xloud code #########
+    def xloud_adjust_vcpus(self, instance, count, persist=True):
+        if count < 1:
+            raise exception.InvalidInput(reason="current vcpus must be >= 1")
+
+        # Get the running guest/domain via the Host wrapper
+        guest = self._host.get_guest(instance)
+        dom = guest._domain  # libvirt.virDomain
+
+        try:
+            maxv = dom.maxVcpus()
+        except libvirt.libvirtError:
+            maxv = count
+        if count > maxv:
+            count = maxv
+
+        flags = libvirt.VIR_DOMAIN_VCPU_LIVE
+        if persist:
+            flags |= libvirt.VIR_DOMAIN_VCPU_CONFIG
+
+        try:
+            dom.setVcpusFlags(int(count), flags)
+        except libvirt.libvirtError as e:
+            raise exception.InvalidInput(reason=f"libvirt vcpu change failed: {e}")
+
+    def xloud_adjust_memory(self, instance, memory_mb, persist=True):
+        if memory_mb < 1:
+            raise exception.InvalidInput(reason="current memory must be >= 1 MiB")
+
+        target_kib = int(memory_mb) * units.Ki
+
+        guest = self._host.get_guest(instance)
+        dom = guest._domain
+
+        flags = libvirt.VIR_DOMAIN_AFFECT_LIVE
+        if persist:
+            flags |= libvirt.VIR_DOMAIN_AFFECT_CONFIG
+
+        try:
+            dom.setMemoryFlags(target_kib, flags)
+        except libvirt.libvirtError as e:
+            raise exception.InvalidInput(reason=f"libvirt memory change failed: {e}")
+    ###############################
+
     def init_host(self, host):
         self._host.initialize()
 
@@ -3989,6 +4033,13 @@ class LibvirtDriver(driver.ComputeDriver):
 
         self._volume_snapshot_update_status(context, snapshot_id, 'deleting')
         self._volume_refresh_connection_info(context, instance, volume_id)
+
+    ########################## xloud Code
+    def hotplug_vcpus(self, instance, new_count):
+        """Hotplug vCPUs for a running guest."""
+        guest = self._host.get_guest(instance)
+        guest.set_vcpus(new_count)
+    ###########################
 
     def reboot(self, context, instance, network_info, reboot_type,
                block_device_info=None, bad_volumes_callback=None,
@@ -7486,6 +7537,55 @@ class LibvirtDriver(driver.ComputeDriver):
         # We are using default unit for memory: KiB
         guest.memory = flavor.memory_mb * units.Ki
         guest.vcpus = flavor.vcpus
+
+        ####################### Xloud Code
+        # --- XLOUD: combined min vCPU + min memory handling ---
+        def _as_int(val):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return None
+
+        # Prefer per-instance metadata; fall back to flavor extra_specs if present
+        min_cpu_raw = (instance.metadata or {}).get('minimum_cpu') or \
+                    (flavor.extra_specs or {}).get('minimum_cpu')
+        min_mem_raw = (instance.metadata or {}).get('minimum_memory') or \
+                    (flavor.extra_specs or {}).get('minimum_memory')
+
+        # ----- vCPUs -----
+        min_cpu = _as_int(min_cpu_raw)
+        if min_cpu is not None:
+            if min_cpu < 1:
+                LOG.warning("minimum_cpu < 1 for %s; clamping to 1", instance.uuid)
+                min_cpu = 1
+            if min_cpu > flavor.vcpus:
+                LOG.warning("minimum_cpu > flavor.vcpus for %s; clamping to %d",
+                            instance.uuid, flavor.vcpus)
+                min_cpu = flavor.vcpus
+            guest.vcpus_current = min_cpu
+        else:
+            guest.vcpus_current = flavor.vcpus  # default current == max
+
+        # ----- Memory (MB → KiB) -----
+        min_mem_mb = _as_int(min_mem_raw)
+        if min_mem_mb is not None:
+            if min_mem_mb < 1:
+                LOG.warning("minimum_memory < 1MB for %s; clamping to 1MB", instance.uuid)
+                min_mem_mb = 1
+            if min_mem_mb > flavor.memory_mb:
+                LOG.warning("minimum_memory > flavor.memory_mb for %s; clamping to %dMB",
+                            instance.uuid, flavor.memory_mb)
+                min_mem_mb = flavor.memory_mb
+            guest.current_memory = min_mem_mb * units.Ki  # libvirt uses KiB
+        else:
+            guest.current_memory = None  # omit → libvirt treats current==max
+
+        # Final guard: currentMemory must not exceed memory
+        if guest.current_memory is not None and guest.current_memory > guest.memory:
+            LOG.warning("currentMemory > memory for %s; fixing to memory", instance.uuid)
+            guest.current_memory = guest.memory
+        # --- end XLOUD block ---
+        ################################################
 
         guest_numa_config = self._get_guest_numa_config(
             instance.numa_topology, flavor, image_meta)

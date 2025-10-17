@@ -707,6 +707,18 @@ class ComputeManager(manager.Manager):
         self.rt = resource_tracker.ResourceTracker(
             self.host, self.driver, reportclient=self.reportclient)
 
+    ###############xloud code
+    def xloud_adjust_vcpus(self, context, instance, target, persist=True):
+        LOG.info("xloud_adjust_vcpus: uuid=%s target=%s persist=%s",
+                 instance.uuid, target, persist)
+        self.driver.xloud_adjust_vcpus(instance, int(target), persist)
+
+    def xloud_adjust_memory(self, context, instance, target_mb, persist=True):
+        LOG.info("xloud_adjust_memory: uuid=%s target_mb=%s persist=%s",
+                 instance.uuid, target_mb, persist)
+        self.driver.xloud_adjust_memory(instance, int(target_mb), persist)
+    ######################
+
     def reset(self):
         LOG.info('Reloading compute RPC API')
         compute_rpcapi.reset_globals()
@@ -6138,6 +6150,22 @@ class ComputeManager(manager.Manager):
                                            instance.uuid)
         return orig_alloc
 
+    #########Xloud Code
+    @wrap_exception()
+    @wrap_instance_event(prefix='compute')
+    @wrap_instance_fault
+    def hotplug_vcpus(self, context, instance, new_count):
+        return self._hotplug_vcpus(context, instance, new_count)
+
+    def _hotplug_vcpus(self, context, instance, new_count):
+        flavor_vcpus = instance.flavor.vcpus
+        if new_count > flavor_vcpus:
+            raise exception.InvalidRequest(
+                _("Requested vCPU count %d exceeds flavor limit %d") %
+                (new_count, flavor_vcpus))
+        self.driver.hotplug_vcpus(instance, new_count)
+    #######################
+
     def _prep_resize(
         self, context, image, instance, flavor, filter_properties, node,
         migration, request_spec, clean_shutdown=True,
@@ -6752,6 +6780,25 @@ class ComputeManager(manager.Manager):
         instance.root_gb = flavor.root_gb
         instance.ephemeral_gb = flavor.ephemeral_gb
         instance.flavor = flavor
+
+        ##########xloud code
+        extra_specs = flavor.extra_specs or {}
+        instance.metadata = instance.metadata or {}
+        if 'minimum_cpu' in extra_specs:
+            vcpus = int(extra_specs['minimum_cpu'])
+            if vcpus > flavor.vcpus:
+                raise exception.InvalidInput(
+                    reason='minimum_cpu exceeds flavor vcpus')
+            instance.metadata['minimum_cpu'] = str(vcpus) 
+        else:
+            instance.metadata.pop('minimum_cpu', None) 
+        if 'minimum_memory' in extra_specs:
+            memory = int(extra_specs['minimum_memory'])
+            if memory > flavor.memory_mb:
+                raise exception.InvalidInput(
+                    reason='minimum_memory exceeds flavor memory')
+            instance.memory_mb = memory
+        ############
 
     def _update_volume_attachments(self, context, instance, bdms):
         """Updates volume attachments using the virt driver host connector.

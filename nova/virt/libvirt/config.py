@@ -3083,6 +3083,8 @@ class LibvirtConfigGuest(LibvirtConfigObject):
         self.memtune = None
         self.numatune = None
         self.vcpus = 1
+        self.vcpus_current = None  #xloud code
+        self.current_memory = None  #xloud code
         self.cpuset = None
         self.cpu = None
         self.cputune = None
@@ -3118,6 +3120,9 @@ class LibvirtConfigGuest(LibvirtConfigObject):
         root.append(self._text_node("uuid", self.uuid))
         root.append(self._text_node("name", self.name))
         root.append(self._text_node("memory", self.memory))
+        #xloud - add currentMemory support
+        if self.current_memory is not None:
+            root.append(self._text_node("currentMemory", self.current_memory))
         if self.max_memory_size is not None:
             max_memory = self._text_node("maxMemory", self.max_memory_size)
             max_memory.set("slots", str(self.max_memory_slots))
@@ -3128,12 +3133,18 @@ class LibvirtConfigGuest(LibvirtConfigObject):
             root.append(self.memtune.format_dom())
         if self.numatune is not None:
             root.append(self.numatune.format_dom())
+        #xloud - add vcpus_current support
         if self.cpuset is not None:
             vcpu = self._text_node("vcpu", self.vcpus)
             vcpu.set("cpuset", hardware.format_cpu_spec(self.cpuset))
+            if self.vcpus_current is not None:
+                vcpu.set("current", str(self.vcpus_current))
             root.append(vcpu)
         else:
-            root.append(self._text_node("vcpu", self.vcpus))
+            vcpu = self._text_node("vcpu", self.vcpus)
+            if self.vcpus_current is not None:
+                vcpu.set("current", str(self.vcpus_current))
+            root.append(vcpu)
 
         if len(self.metadata) > 0:
             metadata = etree.Element("metadata")
@@ -3287,6 +3298,9 @@ class LibvirtConfigGuest(LibvirtConfigObject):
             self.vcpus = int(xmldoc.text)
             if xmldoc.get('cpuset') is not None:
                 self.cpuset = hardware.parse_cpu_spec(xmldoc.get('cpuset'))
+            #xloud - parse current attribute
+            if xmldoc.get('current') is not None:
+                self.vcpus_current = int(xmldoc.get('current'))
 
     def _parse_os(self, xmldoc):
         if xmldoc.get('firmware'):

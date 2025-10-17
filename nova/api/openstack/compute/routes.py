@@ -86,6 +86,8 @@ from nova.api.openstack.compute import versionsV21
 from nova.api.openstack.compute import virtual_interfaces
 from nova.api.openstack.compute import volume_attachments
 from nova.api.openstack.compute import volumes
+from nova.api.openstack.compute import xloud_adjust  #xloud
+from nova.api.openstack.compute import xloud_adjust as xloud_adjust_mod  #xloud
 from nova.api.openstack import wsgi
 from nova.api import wsgi as base_wsgi
 
@@ -352,6 +354,12 @@ virtual_interfaces_controller = functools.partial(_create_controller,
 
 volumes_controller = functools.partial(_create_controller,
     volumes.VolumeController, [])
+
+
+#xloud - controller factory (pattern used throughout this file)
+xloud_adjust_controller = functools.partial(
+    _create_controller, xloud_adjust_mod.XloudAdjustController, []
+)
 
 
 # NOTE(alex_xu): This is structure of this route list as below:
@@ -850,6 +858,9 @@ ROUTE_LIST = (
     }),
     ('/servers/{server_id}/topology', {
         'GET': [server_topology_controller, 'index']
+    }),
+    ('/os-xloud-adjust/{server_id}', {  #xloud
+        'POST': [xloud_adjust_controller, 'update']
     }),
 )
 

@@ -73,6 +73,7 @@ UNLOCK = 'unlock'
 BACKUP = 'createBackup'
 CREATE_IMAGE = 'createImage'
 RESET_STATE = 'resetState'
+HOTPLUG_VCPUS = 'hotplug_vcpus'  #xloud
 
 # nova-manage instance actions logged to allow operators and users alike to
 # track out of band changes made to their instances.

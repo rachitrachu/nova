@@ -353,6 +353,31 @@ class ComputeDriver(object):
     # other driver.
     rebalances_nodes = False
 
+    ################xloud code
+    def xloud_adjust_vcpus(self, instance, count, persist=True):
+        """Set the current (live) vCPU count for an instance.
+        :param instance: nova.objects.Instance
+        :param count: int >=1
+        :param persist: also write to config XML if possible
+        """
+        raise NotImplementedError()
+
+    def xloud_adjust_memory(self, instance, memory_mb, persist=True):
+        """Set the current (balloon) memory target in MiB.
+        :param instance: nova.objects.Instance
+        :param memory_mb: int >=1
+        :param persist: also write to config XML if possible
+        """
+        raise NotImplementedError()
+
+    def hotplug_vcpus(self, instance, new_count):
+        """Hotplug vCPUs for a running guest.
+        :param instance: nova.objects.Instance
+        :param new_count: int - new total vCPU count
+        """
+        raise NotImplementedError()
+    #######################
+
     def __init__(self, virtapi):
         self.virtapi = virtapi
         self._compute_event_callback = None

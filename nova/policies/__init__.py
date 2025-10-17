@@ -68,6 +68,7 @@ from nova.policies import suspend_server
 from nova.policies import tenant_networks
 from nova.policies import volumes
 from nova.policies import volumes_attachments
+from nova.policies import xloud_adjust  #xloud
 
 
 def list_rules():
@@ -126,5 +127,6 @@ def list_rules():
         suspend_server.list_rules(),
         tenant_networks.list_rules(),
         volumes.list_rules(),
-        volumes_attachments.list_rules()
+        volumes_attachments.list_rules(),
+        xloud_adjust.list_rules(),  #xloud
     )

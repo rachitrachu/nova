@@ -4791,6 +4791,20 @@ class API:
         self._record_action_start(context, instance, instance_actions.RESUME)
         self.compute_rpcapi.resume_instance(context, instance)
 
+    ######## Xloud Code
+    @check_instance_lock
+    @check_instance_state(
+        vm_state=[vm_states.ACTIVE, vm_states.PAUSED, vm_states.STOPPED],
+        task_state=[None],
+    )
+    def hotplug_vcpus(self, context, instance, new_count):
+        """Hotplug vCPUs to a running instance."""
+        self._record_action_start(
+            context, instance, instance_actions.HOTPLUG_VCPUS)
+        return self.compute_rpcapi.hotplug_vcpus(
+            context, instance=instance, new_count=new_count)
+    ################
+
     @reject_vtpm_instances(instance_actions.RESCUE)
     @check_instance_lock
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED,
