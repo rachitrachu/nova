@@ -319,6 +319,16 @@ class Guest(object):
         """Whether domain config is persistently stored on the host."""
         return self._domain.isPersistent()
 
+    ###########################xloud code
+    def set_vcpus(self, count):
+        """Set the number of active vCPUs for the guest.
+
+        :param count: Total number of vCPUs the guest should have enabled.
+        """
+        flags = libvirt.VIR_DOMAIN_VCPU_LIVE | libvirt.VIR_DOMAIN_VCPU_CONFIG
+        self._domain.setVcpusFlags(count, flags)
+    #########################
+
     def attach_device(self, conf, persistent=False, live=False):
         """Attaches device to the guest.
 
