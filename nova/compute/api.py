@@ -123,8 +123,6 @@ MIN_COMPUTE_VDPA_ATTACH_DETACH = 62
 MIN_COMPUTE_VDPA_HOTPLUG_LIVE_MIGRATION = 63
 
 
-SUPPORT_SHARES = 67
-
 # FIXME(danms): Keep a global cache of the cells we find the
 # first time we look. This needs to be refreshed on a timer or
 # trigger.
@@ -376,31 +374,6 @@ def block_port_accelerators():
             return func(self, context, instance, *args, **kwargs)
         return wrapper
     return inner
-
-
-def block_shares_not_supported():
-    """Block actions not allowed if the instance has a share.
-    """
-    def inner(func):
-        @functools.wraps(func)
-        def wrapper(self, context, instance, *args, **kwargs):
-            # Check if instance has a share mapped
-            if instance_has_share(context, instance):
-                raise exception.ForbiddenWithShare()
-            return func(self, context, instance, *args, **kwargs)
-        return wrapper
-    return inner
-
-
-def instance_has_share(context, instance):
-    im = objects.InstanceMapping.get_by_instance_uuid(
-        context, instance.uuid)
-    with nova_context.target_cell(context, im.cell_mapping) as cctxt:
-        db_shares = (
-            objects.share_mapping.ShareMappingList.get_by_instance_uuid(
-                cctxt, instance.uuid)
-        )
-        return db_shares
 
 
 def block_extended_resource_request(function):
@@ -864,7 +837,7 @@ class API:
     # TODO(huaqiang): Remove in Wallaby when there is no nova-compute node
     # having a version prior to Victoria.
     @staticmethod
-    def _check_compute_service_for_mixed_instance(numa_topology, min_comp_ver):
+    def _check_compute_service_for_mixed_instance(numa_topology):
         """Check if the nova-compute service is ready to support mixed instance
         when the CPU allocation policy is 'mixed'.
         """
@@ -878,7 +851,9 @@ class API:
 
         # Catch a request creating a mixed instance, make sure all nova-compute
         # service have been upgraded and support the mixed policy.
-        if min_comp_ver < MIN_VER_NOVA_COMPUTE_MIXED_POLICY:
+        minimal_version = objects.service.get_minimum_version_all_cells(
+            nova_context.get_admin_context(), ['nova-compute'])
+        if minimal_version < MIN_VER_NOVA_COMPUTE_MIXED_POLICY:
             raise exception.MixedInstanceNotSupportByComputeService()
 
     @staticmethod
@@ -1040,7 +1015,7 @@ class API:
 
     def _checks_for_create_and_rebuild(
         self, context, image_id, image, flavor, metadata, files_to_inject,
-        root_bdm, min_comp_ver, validate_numa=True,
+        root_bdm, validate_numa=True,
     ):
         self._check_metadata_properties_quota(context, metadata)
         self._check_injected_file_quota(context, files_to_inject)
@@ -1049,12 +1024,15 @@ class API:
                                     flavor, root_bdm,
                                     validate_numa=validate_numa)
 
-    def _check_support_vnic_accelerator(
-            self, context, requested_networks, min_comp_ver):
+    def _check_support_vnic_accelerator(self, context, requested_networks):
         if requested_networks:
             for request_net in requested_networks:
                 if request_net.device_profile:
-                    if min_comp_ver < SUPPORT_VNIC_TYPE_ACCELERATOR:
+                    min_version = (objects.service.
+                        get_minimum_version_all_cells(
+                            context,
+                            ['nova-compute']))
+                    if min_version < SUPPORT_VNIC_TYPE_ACCELERATOR:
                         msg = ("Port with cyborg profile is not available"
                             " until upgrade finished.")
                         raise exception.ForbiddenPortsWithAccelerator(msg)
@@ -1081,7 +1059,7 @@ class API:
         key_data, security_groups, availability_zone, user_data, metadata,
         access_ip_v4, access_ip_v6, requested_networks, config_drive,
         auto_disk_config, reservation_id, max_count,
-        supports_port_resource_request, min_comp_ver,
+        supports_port_resource_request,
     ):
         """Verify all the input parameters regardless of the provisioning
         strategy being performed.
@@ -1144,8 +1122,7 @@ class API:
             affinity_policy=pci_numa_affinity_policy)
         network_metadata, port_resource_requests, req_lvl_params = result
 
-        self._check_support_vnic_accelerator(
-            context, requested_networks, min_comp_ver)
+        self._check_support_vnic_accelerator(context, requested_networks)
         self._check_support_vnic_remote_managed(context, requested_networks)
 
         # Creating servers with ports that have resource requests, like QoS
@@ -1161,7 +1138,9 @@ class API:
         ):
             # we only support the extended resource request if the computes are
             # upgraded to Xena.
-            if min_comp_ver < MIN_COMPUTE_BOOT_WITH_EXTENDED_RESOURCE_REQUEST:
+            min_version = objects.service.get_minimum_version_all_cells(
+                context, ["nova-compute"])
+            if min_version < MIN_COMPUTE_BOOT_WITH_EXTENDED_RESOURCE_REQUEST:
                 raise exception.ExtendedResourceRequestOldCompute()
 
         base_options = {
@@ -1698,10 +1677,6 @@ class API:
                 context, self.image_api, self.volume_api, block_device_mapping,
                 legacy_bdm)
 
-        # Only lookup the minimum compute version once
-        min_comp_ver = objects.service.get_minimum_version_all_cells(
-            context, ["nova-compute"])
-
         self._check_auto_disk_config(image=boot_meta,
                                      auto_disk_config=auto_disk_config)
 
@@ -1715,15 +1690,13 @@ class API:
             user_data, metadata, access_ip_v4, access_ip_v6,
             requested_networks, config_drive, auto_disk_config,
             reservation_id, max_count, supports_port_resource_request,
-            min_comp_ver
         )
 
         # TODO(huaqiang): Remove in Wallaby
         # check nova-compute nodes have been updated to Victoria to support the
         # mixed CPU policy for creating a new instance.
         numa_topology = base_options.get('numa_topology')
-        self._check_compute_service_for_mixed_instance(
-            numa_topology, min_comp_ver)
+        self._check_compute_service_for_mixed_instance(numa_topology)
 
         # max_net_count is the maximum number of instances requested by the
         # user adjusted for any network quota constraints, including
@@ -1754,8 +1727,7 @@ class API:
         # _validate_and_build_base_options().
         self._checks_for_create_and_rebuild(context, image_id, boot_meta,
                 flavor, metadata, injected_files,
-                block_device_mapping.root_bdm(), min_comp_ver,
-                validate_numa=False)
+                block_device_mapping.root_bdm(), validate_numa=False)
 
         instance_group = self._get_requested_instance_group(
             context, filter_properties)
@@ -3616,7 +3588,6 @@ class API:
             if img_arch:
                 fields_obj.Architecture.canonicalize(img_arch)
 
-    @block_shares_not_supported()
     @reject_vtpm_instances(instance_actions.REBUILD)
     @block_accelerators(until_service=SUPPORT_ACCELERATOR_SERVICE_FOR_REBUILD)
     # TODO(stephenfin): We should expand kwargs out to named args
@@ -3649,10 +3620,6 @@ class API:
                 instance.key_name = None
                 instance.key_data = None
                 instance.keypairs = objects.KeyPairList(objects=[])
-
-        # Only lookup the minimum compute version once
-        min_comp_ver = objects.service.get_minimum_version_all_cells(
-            context, ["nova-compute"])
 
         # Use trusted_certs value from kwargs to create TrustedCerts object
         trusted_certs = None
@@ -3726,7 +3693,7 @@ class API:
             context, instance.uuid)
 
         self._checks_for_create_and_rebuild(context, image_id, image,
-                flavor, metadata, files_to_inject, root_bdm, min_comp_ver)
+                flavor, metadata, files_to_inject, root_bdm)
 
         # Check the state of the volume. If it is not in-use, an exception
         # will occur when creating attachment during reconstruction,
@@ -4101,7 +4068,7 @@ class API:
                                                migration,
                                                migration.source_compute)
 
-    def _allow_cross_cell_resize(self, context, instance, min_comp_ver):
+    def _allow_cross_cell_resize(self, context, instance):
         """Determine if the request can perform a cross-cell resize on this
         instance.
 
@@ -4122,12 +4089,15 @@ class API:
         if allowed:
             # TODO(mriedem): We can remove this minimum compute version check
             # in the 22.0.0 "V" release.
-            if min_comp_ver < MIN_COMPUTE_CROSS_CELL_RESIZE:
+            min_compute_version = (
+                objects.service.get_minimum_version_all_cells(
+                    context, ['nova-compute']))
+            if min_compute_version < MIN_COMPUTE_CROSS_CELL_RESIZE:
                 LOG.debug('Request is allowed by policy to perform cross-cell '
                           'resize but the minimum nova-compute service '
                           'version in the deployment %s is less than %s so '
                           'cross-cell resize is not allowed at this time.',
-                          min_comp_ver, MIN_COMPUTE_CROSS_CELL_RESIZE)
+                          min_compute_version, MIN_COMPUTE_CROSS_CELL_RESIZE)
                 return False
 
             res_req, req_lvl_params = (
@@ -4188,7 +4158,6 @@ class API:
 
         return node
 
-    @block_shares_not_supported()
     # TODO(stephenfin): This logic would be so much easier to grok if we
     # finally split resize and cold migration into separate code paths
     @block_extended_resource_request
@@ -4208,12 +4177,8 @@ class API:
         host_name can be set in the cold migration case only.
         """
 
-        # Only lookup the minimum compute version once
-        min_comp_ver = objects.service.get_minimum_version_all_cells(
-            context, ["nova-compute"])
-
         allow_cross_cell_resize = self._allow_cross_cell_resize(
-            context, instance, min_comp_ver)
+            context, instance)
 
         if host_name is not None:
             node = self._validate_host_for_cold_migrate(
@@ -4304,12 +4269,6 @@ class API:
             if volume_backed:
                 self._validate_flavor_image_numa_pci(
                     image, new_flavor, validate_pci=True)
-                # The server that image-backed already has the verification of
-                # image min_ram when calling _validate_flavor_image_nostatus.
-                # Here, the verification is added for the server that
-                # volume-backed.
-                if new_flavor['memory_mb'] < int(image.get('min_ram', 0)):
-                    raise exception.FlavorMemoryTooSmall()
             else:
                 self._validate_flavor_image_nostatus(
                     context, image, new_flavor, root_bdm=None,
@@ -4345,7 +4304,7 @@ class API:
             # instance to a new mixed instance from a dedicated or shared
             # instance.
             self._check_compute_service_for_mixed_instance(
-                request_spec.numa_topology, min_comp_ver)
+                request_spec.numa_topology)
 
         instance.task_state = task_states.RESIZE_PREP
         instance.progress = 0
@@ -4441,7 +4400,6 @@ class API:
             allow_same_host = CONF.allow_resize_to_same_host
         return allow_same_host
 
-    @block_shares_not_supported()
     @block_port_accelerators()
     @reject_vtpm_instances(instance_actions.SHELVE)
     @block_accelerators(until_service=54)
@@ -4755,7 +4713,6 @@ class API:
         return self.compute_rpcapi.get_instance_diagnostics(context,
                                                             instance=instance)
 
-    @block_shares_not_supported()
     @block_port_accelerators()
     @reject_vdpa_instances(
         instance_actions.SUSPEND, until=MIN_COMPUTE_VDPA_HOTPLUG_LIVE_MIGRATION
@@ -5460,6 +5417,20 @@ class API:
                         instance_uuid=instance.uuid)
 
     @check_instance_lock
+    @check_instance_state(
+        vm_state=[vm_states.ACTIVE, vm_states.PAUSED, vm_states.STOPPED],
+        task_state=[None],
+    )
+######## Xloud Code
+    def hotplug_vcpus(self, context, instance, new_count):
+        """Hotplug vCPUs to a running instance."""
+        self._record_action_start(
+            context, instance, instance_actions.HOTPLUG_VCPUS)
+        return self.compute_rpcapi.hotplug_vcpus(
+            context, instance=instance, new_count=new_count)
+    @check_instance_lock
+
+################
     @reject_vdpa_instances(
         instance_actions.ATTACH_INTERFACE, until=MIN_COMPUTE_VDPA_ATTACH_DETACH
     )
@@ -5557,7 +5528,6 @@ class API:
 
         return _metadata
 
-    @block_shares_not_supported()
     @block_extended_resource_request
     @block_port_accelerators()
     @reject_vdpa_instances(
@@ -5695,7 +5665,6 @@ class API:
         self.compute_rpcapi.live_migration_abort(context,
                 instance, migration.id)
 
-    @block_shares_not_supported()
     @block_extended_resource_request
     @block_port_accelerators()
     @reject_vtpm_instances(instance_actions.EVACUATE)
@@ -6070,18 +6039,6 @@ class API:
                 host_status = fields_obj.HostStatus.NONE
             host_statuses[instance.uuid] = host_status
         return host_statuses
-
-    def allow_share(self, context, instance, share_mapping):
-        self._record_action_start(
-            context, instance, instance_actions.ATTACH_SHARE)
-        self.compute_rpcapi.allow_share(
-            context, instance, share_mapping)
-
-    def deny_share(self, context, instance, share_mapping):
-        self._record_action_start(
-            context, instance, instance_actions.DETACH_SHARE)
-        self.compute_rpcapi.deny_share(
-            context, instance, share_mapping)
 
 
 def target_host_cell(fn):

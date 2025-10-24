@@ -56,7 +56,6 @@ from nova.policies import server_external_events
 from nova.policies import server_groups
 from nova.policies import server_metadata
 from nova.policies import server_password
-from nova.policies import server_shares
 from nova.policies import server_tags
 from nova.policies import server_topology
 from nova.policies import servers
@@ -68,6 +67,8 @@ from nova.policies import suspend_server
 from nova.policies import tenant_networks
 from nova.policies import volumes
 from nova.policies import volumes_attachments
+from nova.policies import xloud_adjust
+
 
 
 def list_rules():
@@ -115,7 +116,6 @@ def list_rules():
         server_groups.list_rules(),
         server_metadata.list_rules(),
         server_password.list_rules(),
-        server_shares.list_rules(),
         server_tags.list_rules(),
         server_topology.list_rules(),
         servers.list_rules(),
@@ -126,5 +126,6 @@ def list_rules():
         suspend_server.list_rules(),
         tenant_networks.list_rules(),
         volumes.list_rules(),
-        volumes_attachments.list_rules()
+        volumes_attachments.list_rules(),
+        xloud_adjust.list_rules(),
     )

@@ -157,7 +157,7 @@ class ResourceRequest(object):
 
         if enable_pinning_translate:
             # Next up, let's handle those pesky CPU pinning policies
-            res_req._translate_pinning_policies(request_spec.flavor, image)
+            res_req._translate_pinning_policies(request_spec, image) ## xloud   
 
         # Add on any request groups that came from outside of the flavor/image,
         # e.g. from ports or device profiles.
@@ -195,8 +195,6 @@ class ResourceRequest(object):
         res_req._translate_secure_boot_request(request_spec.flavor, image)
 
         res_req._translate_maxphysaddr_request(request_spec.flavor, image)
-
-        res_req._translate_stateless_firmware_request(image)
 
         res_req.strip_zeros()
 
@@ -292,30 +290,19 @@ class ResourceRequest(object):
             self._add_trait(trait, 'required')
             LOG.debug("Requiring maxphysaddr support via trait %s.", trait)
 
-    def _translate_stateless_firmware_request(self, image):
-        if hardware.get_stateless_firmware_constraint(image):
-            self._add_trait(os_traits.COMPUTE_SECURITY_STATELESS_FIRMWARE,
-                            'required')
-
     def _translate_vtpm_request(self, flavor, image):
         vtpm_config = hardware.get_vtpm_constraint(flavor, image)
         if not vtpm_config:
             return
 
-        # Require the appropriate vTPM model support trait on a host.
-        model_trait = os_traits.COMPUTE_SECURITY_TPM_TIS
-        if vtpm_config.model == obj_fields.TPMModel.CRB:
-            model_trait = os_traits.COMPUTE_SECURITY_TPM_CRB
-
         # Require the appropriate vTPM version support trait on a host.
-        version_trait = os_traits.COMPUTE_SECURITY_TPM_1_2
-        if vtpm_config.version == obj_fields.TPMVersion.v2_0:
-            version_trait = os_traits.COMPUTE_SECURITY_TPM_2_0
+        if vtpm_config.version == obj_fields.TPMVersion.v1_2:
+            trait = os_traits.COMPUTE_SECURITY_TPM_1_2
+        else:
+            trait = os_traits.COMPUTE_SECURITY_TPM_2_0
 
-        self._add_trait(model_trait, 'required')
-        self._add_trait(version_trait, 'required')
-        LOG.debug("Requiring emulated TPM support via trait %s and %s.",
-                  version_trait, model_trait)
+        self._add_trait(trait, 'required')
+        LOG.debug("Requiring emulated TPM support via trait %s.", trait)
 
     def _translate_memory_encryption(self, flavor, image):
         """When the hw:mem_encryption extra spec or the hw_mem_encryption
@@ -352,7 +339,7 @@ class ResourceRequest(object):
             LOG.debug("Added resource %s=%d to requested resources",
                       resource_class, amount)
 
-    def _translate_pinning_policies(self, flavor, image):
+    def _translate_pinning_policies(self, request_spec, image): ##xloud    
         """Translate the legacy pinning policies to resource requests."""
         # NOTE(stephenfin): These can raise exceptions but these have already
         # been validated by 'nova.virt.hardware.numa_get_constraints' in the
@@ -361,6 +348,7 @@ class ResourceRequest(object):
         # requests and implicit 'hw:cpu_policy'-based requests, mismatches
         # between the number of CPUs in the flavor and explicit VCPU/PCPU
         # requests, etc.
+        flavor = request_spec.flavor
         cpu_policy = hardware.get_cpu_policy_constraint(
             flavor, image)
         cpu_thread_policy = hardware.get_cpu_thread_policy_constraint(
@@ -375,7 +363,7 @@ class ResourceRequest(object):
             self.cpu_pinning_requested = True
 
             # Switch VCPU -> PCPU
-            pcpus = flavor.vcpus
+            pcpus = request_spec.vcpus
 
             LOG.debug('Translating request for %(vcpu_rc)s=%(pcpus)d to '
                       '%(vcpu_rc)s=0,%(pcpu_rc)s=%(pcpus)d',
@@ -391,8 +379,8 @@ class ResourceRequest(object):
             realtime_cpus = hardware.get_realtime_cpu_constraint(flavor, image)
 
             pcpus = len(dedicated_cpus or realtime_cpus or [])
-            vcpus = flavor.vcpus - pcpus
-
+            vcpus = request_spec.vcpus - pcpus  #xloud
+ 
             # apply for the VCPU resource of a 'mixed' instance
             self._add_resource(orc.VCPU, vcpus)
 

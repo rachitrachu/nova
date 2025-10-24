@@ -20,76 +20,24 @@ Driver base-classes:
     types that support that contract
 """
 
-import dataclasses
 import itertools
 import sys
-import time
 import typing as ty
 
 import os_resource_classes as orc
 import os_traits
-
 from oslo_log import log as logging
 from oslo_utils import importutils
 
 import nova.conf
-import nova.virt.node
-
 from nova import context as nova_context
 from nova.i18n import _
-from nova.network import model as network_model
 from nova import objects
-from nova import version
 from nova.virt import event as virtevent
+import nova.virt.node
 
 CONF = nova.conf.CONF
 LOG = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass
-class FlavorMeta:
-    name: str
-    memory_mb: int
-    vcpus: int
-    root_gb: int
-    ephemeral_gb: int
-    extra_specs: dict
-    swap: int
-
-
-@dataclasses.dataclass
-class ImageMeta:
-    id: str
-    name: str
-    properties: dict
-
-
-@dataclasses.dataclass
-class NovaInstanceMeta:
-    name: str
-    uuid: str
-
-
-@dataclasses.dataclass
-class OwnerMeta:
-    userid: str
-    username: str
-    projectid: str
-    projectname: str
-
-
-@dataclasses.dataclass
-class InstanceDriverMetadata:
-    root_type: str
-    root_id: str
-    instance_meta: NovaInstanceMeta
-    owner: OwnerMeta
-    image: ImageMeta
-    flavor: FlavorMeta
-    network_info: network_model.NetworkInfo
-    nova_package: str = dataclasses.field(
-        default_factory=version.version_string_with_package)
-    creation_time: float = dataclasses.field(default_factory=time.time)
 
 
 def get_block_device_info(instance, block_device_mapping):
@@ -219,10 +167,6 @@ CAPABILITY_TRAITS_MAP = {
         os_traits.COMPUTE_ADDRESS_SPACE_PASSTHROUGH,
     "supports_address_space_emulated":
         os_traits.COMPUTE_ADDRESS_SPACE_EMULATED,
-    "supports_stateless_firmware":
-        os_traits.COMPUTE_SECURITY_STATELESS_FIRMWARE,
-    "supports_virtio_fs": os_traits.COMPUTE_STORAGE_VIRTIO_FS,
-    "supports_mem_backing_file": os_traits.COMPUTE_MEM_BACKING_FILE,
 }
 
 
@@ -294,8 +238,6 @@ class ComputeDriver(object):
         "supports_remote_managed_ports": False,
         "supports_address_space_passthrough": False,
         "supports_address_space_emulated": False,
-        "supports_virtio_fs": False,
-        "supports_mem_backing_file": False,
 
         # Ephemeral encryption support flags
         "supports_ephemeral_encryption": False,
@@ -320,7 +262,27 @@ class ComputeDriver(object):
     # hosts. This is really here for ironic and should not be used by any
     # other driver.
     rebalances_nodes = False
+################ xloud code
 
+
+    def set_current_vcpus(self, instance, count, persist=True):
+        """Set the current (live) vCPU count for an instance.
+        :param instance: nova.objects.Instance
+        :param count: int >=1
+        :param persist: also write to config XML if possible
+        """
+        raise NotImplementedError()
+
+    def set_current_memory_mb(self, instance, memory_mb, persist=True):
+        """Set the current (balloon) memory target in MiB.
+        :param instance: nova.objects.Instance
+        :param memory_mb: int >=1
+        :param persist: also write to config XML if possible
+        """
+        raise NotImplementedError()
+    
+
+#######################
     def __init__(self, virtapi):
         self.virtapi = virtapi
         self._compute_event_callback = None
@@ -351,55 +313,6 @@ class ComputeDriver(object):
         """
         # TODO(Vek): Need to pass context in for access to auth_token
         raise NotImplementedError()
-
-    @classmethod
-    def get_instance_driver_metadata(
-        cls, instance: 'nova.objects.instance.Instance',
-        network_info: network_model.NetworkInfo
-    ) -> InstanceDriverMetadata:
-        """Get driver metadata from instance and network info
-
-        :param instance: nova.objects.instance.Instance
-        :param network_info: instance network information
-        :returns: InstanceDriverMetadata
-        """
-
-        instance_name = instance.display_name or instance.uuid
-        system_meta = instance.system_metadata
-        instance_meta = NovaInstanceMeta(
-            str(instance_name), str(instance.uuid))
-        owner = OwnerMeta(
-            userid=instance.user_id,
-            username=system_meta.get('owner_user_name', 'N/A'),
-            projectid=instance.project_id,
-            projectname=system_meta.get('owner_project_name', 'N/A')
-        )
-        flavor = FlavorMeta(
-            name=instance.flavor.name,
-            memory_mb=instance.flavor.memory_mb,
-            vcpus=instance.flavor.vcpus,
-            ephemeral_gb=instance.flavor.ephemeral_gb,
-            root_gb=instance.flavor.root_gb,
-            swap=instance.flavor.swap,
-            extra_specs=instance.flavor.extra_specs,
-        )
-        image = ImageMeta(
-            id=instance.image_ref,
-            name=system_meta.get('image_name'),
-            properties=instance.image_meta.properties
-        )
-        meta = InstanceDriverMetadata(
-            instance_meta=instance_meta,
-            owner=owner,
-            flavor=flavor,
-            image=image,
-            root_type = 'image' if instance.image_ref else 'volume',
-            root_id = instance.image_ref,
-            creation_time = time.time(),
-            network_info=network_info
-        )
-        LOG.debug('InstanceDriverMetadata: %s', meta)
-        return meta
 
     def get_num_instances(self):
         """Return the total number of virtual machines.
@@ -612,7 +525,7 @@ class ComputeDriver(object):
 
     def reboot(self, context, instance, network_info, reboot_type,
                block_device_info=None, bad_volumes_callback=None,
-               accel_info=None, share_info=None):
+               accel_info=None):
         """Reboot the specified instance.
 
         After this is called successfully, the instance's state
@@ -972,14 +885,7 @@ class ComputeDriver(object):
         """
         raise NotImplementedError()
 
-    def resume(
-        self,
-        context,
-        instance,
-        network_info,
-        block_device_info=None,
-        share_info=None
-    ):
+    def resume(self, context, instance, network_info, block_device_info=None):
         """resume the specified suspended instance.
 
         The suspended instance gets resumed and will use CPU cycles and memory
@@ -995,28 +901,21 @@ class ComputeDriver(object):
             Necessary network information for the resume.
         :param dict block_device_info:
             Instance volume block device info.
-        :param nova.objects.share_mapping.ShareMapingList share_info
-            optional list of share_mapping
 
         :return: None
         """
         raise NotImplementedError()
 
     def resume_state_on_host_boot(self, context, instance, network_info,
-                                  share_info, block_device_info=None):
+                                  block_device_info=None):
         """resume guest state when a host is booted.
 
         :param instance: nova.objects.instance.Instance
-        :param nova.network.model.NetworkInfo network_info:
-            Necessary network information for the resume.
-        :param share_info: a ShareMappingList containing the attached shares.
-        :param dict block_device_info:
-            The block device mapping of the instance.
         """
         raise NotImplementedError()
 
     def rescue(self, context, instance, network_info, image_meta,
-               rescue_password, block_device_info, share_info):
+               rescue_password, block_device_info):
         """Rescue the specified instance.
 
         :param nova.context.RequestContext context:
@@ -1030,8 +929,6 @@ class ComputeDriver(object):
         :param rescue_password: new root password to set for rescue.
         :param dict block_device_info:
             The block device mapping of the instance.
-        :param nova.objects.share_mapping.ShareMapingList share_info
-            list of share_mapping
         """
         raise NotImplementedError()
 
@@ -1058,37 +955,14 @@ class ComputeDriver(object):
         raise NotImplementedError()
 
     def power_on(self, context, instance, network_info,
-                 block_device_info=None, accel_info=None, share_info=None):
+                 block_device_info=None, accel_info=None):
         """Power on the specified instance.
 
-        :param context: security context
         :param instance: nova.objects.instance.Instance
         :param network_info: instance network information
         :param block_device_info: instance volume block device info
         :param accel_info: List of accelerator request dicts. The exact
             data struct is doc'd in nova/virt/driver.py::spawn().
-        :param share_info: a ShareMappingList containing the attached shares.
-        """
-        raise NotImplementedError()
-
-    def mount_share(self, context, instance, share_mapping):
-        """Mount a manila share to the compute node.
-
-        :param context: security context
-        :param instance: nova.objects.instance.Instance
-        :param share_mapping: nova.objects.share_mapping.ShareMapping object
-            that define the share
-        """
-        raise NotImplementedError()
-
-    def umount_share(self, context, instance, share_mapping):
-        """Unmount a manila share from the compute node.
-
-        :param context: security context
-        :param instance: nova.objects.instance.Instance
-        :param share_mapping: nova.objects.share_mapping.ShareMapping object
-            that define the share
-        :returns: True if the mountpoint is still in used by another instance
         """
         raise NotImplementedError()
 

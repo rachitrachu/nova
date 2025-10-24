@@ -294,7 +294,15 @@ class Guest(object):
         for vcpu in vcpus[0]:
             yield VCPUInfo(
                 id=vcpu[0], cpu=vcpu[3], state=vcpu[1], time=vcpu[2])
+########################### xloud code
+    def set_vcpus(self, count):
+        """Set the number of active vCPUs for the guest.
 
+        :param count: Total number of vCPUs the guest should have enabled.
+        """
+        flags = libvirt.VIR_DOMAIN_VCPU_LIVE | libvirt.VIR_DOMAIN_VCPU_CONFIG
+        self._domain.setVcpusFlags(count, flags)
+#########################
     def delete_configuration(self):
         """Undefines a domain from hypervisor."""
         try:
@@ -319,16 +327,6 @@ class Guest(object):
         """Whether domain config is persistently stored on the host."""
         return self._domain.isPersistent()
 
-    ###########################xloud code
-    def set_vcpus(self, count):
-        """Set the number of active vCPUs for the guest.
-
-        :param count: Total number of vCPUs the guest should have enabled.
-        """
-        flags = libvirt.VIR_DOMAIN_VCPU_LIVE | libvirt.VIR_DOMAIN_VCPU_CONFIG
-        self._domain.setVcpusFlags(count, flags)
-    #########################
-
     def attach_device(self, conf, persistent=False, live=False):
         """Attaches device to the guest.
 
@@ -342,6 +340,8 @@ class Guest(object):
         flags |= live and libvirt.VIR_DOMAIN_AFFECT_LIVE or 0
 
         device_xml = conf.to_xml()
+        if isinstance(device_xml, bytes):
+            device_xml = device_xml.decode('utf-8')
 
         LOG.debug("attach device xml: %s", device_xml)
         self._domain.attachDeviceFlags(device_xml, flags=flags)
@@ -472,6 +472,8 @@ class Guest(object):
         flags |= live and libvirt.VIR_DOMAIN_AFFECT_LIVE or 0
 
         device_xml = conf.to_xml()
+        if isinstance(device_xml, bytes):
+            device_xml = device_xml.decode('utf-8')
 
         LOG.debug("detach device xml: %s", device_xml)
         self._domain.detachDeviceFlags(device_xml, flags=flags)
@@ -574,6 +576,8 @@ class Guest(object):
         flags |= quiesce and libvirt.VIR_DOMAIN_SNAPSHOT_CREATE_QUIESCE or 0
 
         device_xml = conf.to_xml()
+        if isinstance(device_xml, bytes):
+            device_xml = device_xml.decode('utf-8')
 
         self._domain.snapshotCreateXML(device_xml, flags=flags)
 

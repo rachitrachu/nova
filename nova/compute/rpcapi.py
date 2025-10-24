@@ -29,6 +29,8 @@ from nova.objects import base as objects_base
 from nova.objects import service as service_obj
 from nova import profiler
 from nova import rpc
+from oslo_messaging import Target
+
 
 CONF = nova.conf.CONF
 RPC_TOPIC = "compute"
@@ -405,7 +407,6 @@ class ComputeAPI(object):
         * 6.1 - Add reimage_boot_volume parameter to rebuild_instance()
         * 6.2 - Add target_state parameter to rebuild_instance()
         * 6.3 - Add delete_attachment parameter to remove_volume_connection
-        * 6.4 - Add allow_share() and deny_share()
     '''
 
     VERSION_ALIASES = {
@@ -430,8 +431,6 @@ class ComputeAPI(object):
         'antelope': '6.2',
         'bobcat': '6.2',
         'caracal': '6.3',
-        'dalmatian': '6.3',
-        'epoxy': '6.4',
     }
 
     @property
@@ -580,7 +579,41 @@ class ComputeAPI(object):
         cctxt = client.prepare(server=_compute_host(None, instance),
                                version=version)
         return cctxt.call(ctxt, 'attach_interface', **kw)
+############Xloud Code
+    def hotplug_vcpus(self, ctxt, instance, new_count):
+        kw = {'instance': instance, 'new_count': new_count}
+        version = self._ver(ctxt, '5.0')
+        client = self.router.client(ctxt)
+        cctxt = client.prepare(server=_compute_host(None, instance),
+                               version=version)
+        return cctxt.call(ctxt, 'hotplug_vcpus', **kw)
 
+   ################
+    
+    def xloud_adjust_vcpus(self, ctxt, instance, target, persist=False):
+        """Adjust current vCPUs live (and optionally persist)."""
+        version = self._ver(ctxt, '6.0')  # match your file's baseline (router Target uses 6.0)
+        client = self.router.client(ctxt)
+        cctxt = client.prepare(server=_compute_host(None, instance), version=version)
+        cctxt.cast(ctxt, 'xloud_adjust_vcpus',
+                instance=instance, target=int(target), persist=bool(persist))
+
+    def xloud_adjust_memory(self, ctxt, instance, target_mb, persist=False):
+        """Adjust current balloon memory (MiB) live (and optionally persist)."""
+        version = self._ver(ctxt, '6.0')
+        client = self.router.client(ctxt)
+        cctxt = client.prepare(server=_compute_host(None, instance), version=version)
+        cctxt.cast(ctxt, 'xloud_adjust_memory',
+               instance=instance, target_mb=int(target_mb), persist=bool(persist))
+    def __init__(self):
+        super().__init__()
+        target = Target(topic='compute', version='6.3')   # keep your release’s values
+        serializer = objects.base.NovaObjectSerializer()
+        self.client = rpc.get_client(target, version_cap='auto',
+                                     serializer=serializer)
+ 
+
+####################
     def attach_volume(self, ctxt, instance, bdm):
         version = self._ver(ctxt, '5.0')
         cctxt = self.router.client(ctxt).prepare(
@@ -1478,38 +1511,6 @@ class ComputeAPI(object):
         cctxt.cast(ctxt, 'volume_snapshot_delete', instance=instance,
                    volume_id=volume_id, snapshot_id=snapshot_id,
                    delete_info=delete_info)
-
-    def allow_share(self, ctxt, instance, share_mapping):
-        version = '6.4'
-        client = self.router.client(ctxt)
-        if not client.can_send_version(version):
-            raise exception.UnsupportedRPCVersion(
-                    api="allow_share",
-                    required=version)
-        cctxt = self.router.client(ctxt).prepare(
-                server=_compute_host(None, instance), version=version)
-        cctxt.cast(
-            ctxt,
-            "allow_share",
-            instance=instance,
-            share_mapping=share_mapping
-        )
-
-    def deny_share(self, ctxt, instance, share_mapping):
-        version = '6.4'
-        client = self.router.client(ctxt)
-        if not client.can_send_version(version):
-            raise exception.UnsupportedRPCVersion(
-                    api="deny_share",
-                    required=version)
-        cctxt = self.router.client(ctxt).prepare(
-                server=_compute_host(None, instance), version=version)
-        cctxt.cast(
-            ctxt,
-            "deny_share",
-            instance=instance,
-            share_mapping=share_mapping,
-        )
 
     def external_instance_event(self, ctxt, instances, events, host=None):
         instance = instances[0]

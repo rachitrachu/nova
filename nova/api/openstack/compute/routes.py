@@ -37,6 +37,7 @@ from nova.api.openstack.compute import evacuate
 from nova.api.openstack.compute import extension_info
 from nova.api.openstack.compute import fixed_ips
 from nova.api.openstack.compute import flavor_access
+from nova.api.openstack.compute import flavor_manage
 from nova.api.openstack.compute import flavors
 from nova.api.openstack.compute import flavors_extraspecs
 from nova.api.openstack.compute import floating_ip_dns
@@ -72,7 +73,6 @@ from nova.api.openstack.compute import server_groups
 from nova.api.openstack.compute import server_metadata
 from nova.api.openstack.compute import server_migrations
 from nova.api.openstack.compute import server_password
-from nova.api.openstack.compute import server_shares
 from nova.api.openstack.compute import server_tags
 from nova.api.openstack.compute import server_topology
 from nova.api.openstack.compute import servers
@@ -86,6 +86,9 @@ from nova.api.openstack.compute import virtual_interfaces
 from nova.api.openstack.compute import volumes
 from nova.api.openstack import wsgi
 from nova.api import wsgi as base_wsgi
+from nova.api.openstack.compute import xloud_adjust
+from nova.api.openstack.compute import xloud_adjust as xloud_adjust_mod
+
 
 
 def _create_controller(main_controller, action_controller_list):
@@ -95,7 +98,7 @@ def _create_controller(main_controller, action_controller_list):
 
     controller = wsgi.Resource(main_controller())
     for ctl in action_controller_list:
-        controller.register_subcontroller_actions(ctl())
+        controller.register_actions(ctl())
     return controller
 
 
@@ -143,6 +146,7 @@ fixed_ips_controller = functools.partial(_create_controller,
 flavor_controller = functools.partial(_create_controller,
     flavors.FlavorsController,
     [
+        flavor_manage.FlavorManageController,
         flavor_access.FlavorActionController
     ]
 )
@@ -311,8 +315,6 @@ server_remote_consoles_controller = functools.partial(_create_controller,
 server_security_groups_controller = functools.partial(_create_controller,
     security_groups.ServerSecurityGroupController, [])
 
-server_shares_controller = functools.partial(_create_controller,
-    server_shares.ServerSharesController, [])
 
 server_tags_controller = functools.partial(_create_controller,
     server_tags.ServerTagsController, [])
@@ -351,6 +353,16 @@ virtual_interfaces_controller = functools.partial(_create_controller,
 volumes_controller = functools.partial(_create_controller,
     volumes.VolumeController, [])
 
+
+
+# controller factory (pattern used throughout this file)
+xloud_adjust_controller = functools.partial(
+    _create_controller, xloud_adjust_mod.XloudAdjustController, []
+)
+
+    
+
+#################
 
 # NOTE(alex_xu): This is structure of this route list as below:
 # (
@@ -828,14 +840,6 @@ ROUTE_LIST = (
     ('/servers/{server_id}/os-security-groups', {
         'GET': [server_security_groups_controller, 'index']
     }),
-    ('/servers/{server_id}/shares', {
-        'GET': [server_shares_controller, 'index'],
-        'POST': [server_shares_controller, 'create'],
-    }),
-    ('/servers/{server_id}/shares/{id}', {
-        'GET': [server_shares_controller, 'show'],
-        'DELETE': [server_shares_controller, 'delete'],
-    }),
     ('/servers/{server_id}/tags', {
         'GET': [server_tags_controller, 'index'],
         'PUT': [server_tags_controller, 'update_all'],
@@ -849,7 +853,10 @@ ROUTE_LIST = (
     ('/servers/{server_id}/topology', {
         'GET': [server_topology_controller, 'index']
     }),
-)
+    ('/os-xloud-adjust/{server_id}', {
+        'POST': [xloud_adjust_controller, 'update']
+    }),
+    )
 
 
 class APIRouterV21(base_wsgi.Router):
@@ -889,8 +896,5 @@ class APIRouterV21(base_wsgi.Router):
 
     @classmethod
     def factory(cls, global_config, **local_config):
-        """Simple paste factory.
-
-        :class:`nova.api.wsgi.Router` doesn't have one.
-        """
+        """Simple paste factory, :class:`nova.wsgi.Router` doesn't have one."""
         return cls()

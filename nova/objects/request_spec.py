@@ -173,15 +173,33 @@ class RequestSpec(base.NovaObject):
         # because of a previous RequestSpec version, we want to default
         # that field in order to have the same behaviour.
         self.obj_set_defaults(attrname)
-
+############Xloud Code
     @property
     def vcpus(self):
+        extra = self.flavor.extra_specs or {}
+        if 'minimum_cpu' in extra:
+            try:
+                vcpus = int(extra['minimum_cpu'])
+            except (ValueError, TypeError):
+                vcpus = self.flavor.vcpus
+            else:
+                if vcpus <= self.flavor.vcpus:
+                    return vcpus
         return self.flavor.vcpus
 
     @property
     def memory_mb(self):
+        extra = self.flavor.extra_specs or {}
+        if 'minimum_memory' in extra:
+            try:
+                memory = int(extra['minimum_memory'])
+            except (ValueError, TypeError):
+                memory = self.flavor.memory_mb
+            else:
+                if memory <= self.flavor.memory_mb:
+                    return memory
         return self.flavor.memory_mb
-
+########################
     @property
     def root_gb(self):
         return self.flavor.root_gb
